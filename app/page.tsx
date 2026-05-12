@@ -10,11 +10,23 @@ export default async function HomePage() {
 
   if (user) {
     // Check if user is admin
-    const { data: adminUser } = await supabase
+    const { data: adminUserById } = await supabase
       .from('admin_users')
       .select()
       .eq('id', user.id)
       .single()
+
+    let adminUser = adminUserById
+
+    if (!adminUser && user.email) {
+      const { data: adminUserByEmail } = await supabase
+        .from('admin_users')
+        .select()
+        .eq('email', user.email)
+        .single()
+
+      adminUser = adminUserByEmail
+    }
 
     if (adminUser) {
       redirect('/dashboard')

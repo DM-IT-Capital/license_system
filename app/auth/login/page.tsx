@@ -36,11 +36,23 @@ export default function LoginPage() {
       // Check if user is an admin
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
-        const { data: adminUser } = await supabase
+        const { data: adminUserById } = await supabase
           .from('admin_users')
           .select()
           .eq('id', user.id)
           .single()
+
+        let adminUser = adminUserById
+
+        if (!adminUser && user.email) {
+          const { data: adminUserByEmail } = await supabase
+            .from('admin_users')
+            .select()
+            .eq('email', user.email)
+            .single()
+
+          adminUser = adminUserByEmail
+        }
 
         if (!adminUser) {
           await supabase.auth.signOut()

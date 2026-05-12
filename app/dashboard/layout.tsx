@@ -19,7 +19,7 @@ export default async function DashboardLayout({
     .from('admin_users')
     .select()
     .eq('id', user.id)
-    .single()
+    .maybeSingle()
 
   let adminUser = adminUserById
 
@@ -28,7 +28,7 @@ export default async function DashboardLayout({
       .from('admin_users')
       .select()
       .eq('email', user.email)
-      .single()
+      .maybeSingle()
 
     adminUser = adminUserByEmail
   }

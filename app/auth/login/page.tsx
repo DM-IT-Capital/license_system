@@ -40,27 +40,29 @@ export default function LoginPage() {
       }
 
       // Check if user is an admin
-      const { data: adminUserById } = await supabase
+      const { data: adminUserById, error: adminUserByIdError } = await supabase
         .from('admin_users')
         .select()
         .eq('id', user.id)
-        .single()
+        .maybeSingle()
 
       let adminUser = adminUserById
+      let adminUserError = adminUserByIdError
 
       if (!adminUser && user.email) {
-        const { data: adminUserByEmail } = await supabase
+        const { data: adminUserByEmail, error: adminUserByEmailError } = await supabase
           .from('admin_users')
           .select()
           .eq('email', user.email)
-          .single()
+          .maybeSingle()
 
         adminUser = adminUserByEmail
+        adminUserError = adminUserByEmailError ?? adminUserError
       }
 
       if (!adminUser) {
         await supabase.auth.signOut()
-        toast.error('Access denied. You are not an admin.')
+        toast.error(adminUserError?.message ?? 'Access denied. You are not an admin.')
         return
       }
 

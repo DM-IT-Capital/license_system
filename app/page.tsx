@@ -1,32 +1,19 @@
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
+import { createServiceClient } from '@/lib/supabase/service'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Shield, Key, Users, BarChart3, Zap, Lock, ArrowRight } from 'lucide-react'
 
 export default async function HomePage() {
-  const supabase = await createClient()
+  const supabase = await createServiceClient()
   const { data: { user } } = await supabase.auth.getUser()
 
   if (user) {
-    // Check if user is admin
-    const { data: adminUserById } = await supabase
+    const { data: adminUser } = await supabase
       .from('admin_users')
       .select()
-      .eq('id', user.id)
+      .or(`id.eq.${user.id},email.eq.${user.email}`)
       .maybeSingle()
-
-    let adminUser = adminUserById
-
-    if (!adminUser && user.email) {
-      const { data: adminUserByEmail } = await supabase
-        .from('admin_users')
-        .select()
-        .eq('email', user.email)
-        .maybeSingle()
-
-      adminUser = adminUserByEmail
-    }
 
     if (adminUser) {
       redirect('/dashboard')

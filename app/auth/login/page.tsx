@@ -23,7 +23,7 @@ export default function LoginPage() {
 
     try {
       const supabase = createClient()
-      const { data, error } = await supabase.auth.signInWithPassword({
+      const { error } = await supabase.auth.signInWithPassword({
         email,
         password,
       })
@@ -33,36 +33,16 @@ export default function LoginPage() {
         return
       }
 
-      const user = data.user
-      if (!user) {
-        toast.error('Unable to verify the signed-in user.')
-        return
-      }
+      const checkResponse = await fetch('/api/admin/check', {
+        method: 'POST',
+        credentials: 'include',
+      })
 
-      // Check if user is an admin
-      const { data: adminUserById, error: adminUserByIdError } = await supabase
-        .from('admin_users')
-        .select()
-        .eq('id', user.id)
-        .maybeSingle()
+      const checkResult = await checkResponse.json()
 
-      let adminUser = adminUserById
-      let adminUserError = adminUserByIdError
-
-      if (!adminUser && user.email) {
-        const { data: adminUserByEmail, error: adminUserByEmailError } = await supabase
-          .from('admin_users')
-          .select()
-          .eq('email', user.email)
-          .maybeSingle()
-
-        adminUser = adminUserByEmail
-        adminUserError = adminUserByEmailError ?? adminUserError
-      }
-
-      if (!adminUser) {
+      if (!checkResponse.ok || !checkResult.admin) {
         await supabase.auth.signOut()
-        toast.error(adminUserError?.message ?? 'Access denied. You are not an admin.')
+        toast.error(checkResult.error ?? 'Access denied. You are not an admin.')
         return
       }
 

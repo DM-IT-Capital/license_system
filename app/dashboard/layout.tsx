@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server'
+import { createServiceClient } from '@/lib/supabase/service'
 import { redirect } from 'next/navigation'
 import { DashboardSidebar } from '@/components/dashboard/sidebar'
 
@@ -7,31 +7,18 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode
 }) {
-  const supabase = await createClient()
+  const supabase = await createServiceClient()
   const { data: { user } } = await supabase.auth.getUser()
 
   if (!user) {
     redirect('/auth/login')
   }
 
-  // Check if user is admin
-  const { data: adminUserById } = await supabase
+  const { data: adminUser } = await supabase
     .from('admin_users')
     .select()
-    .eq('id', user.id)
+    .or(`id.eq.${user.id},email.eq.${user.email}`)
     .maybeSingle()
-
-  let adminUser = adminUserById
-
-  if (!adminUser && user.email) {
-    const { data: adminUserByEmail } = await supabase
-      .from('admin_users')
-      .select()
-      .eq('email', user.email)
-      .maybeSingle()
-
-    adminUser = adminUserByEmail
-  }
 
   if (!adminUser) {
     redirect('/auth/login')

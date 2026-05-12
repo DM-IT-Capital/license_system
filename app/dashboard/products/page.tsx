@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { CreateProductDialog } from '@/components/dashboard/create-product-dialog'
+import { CreateTierDialog } from '@/components/dashboard/create-tier-dialog'
 import { Package, Check, Trash2, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { Product, ProductTier } from '@/lib/types'
@@ -66,57 +67,83 @@ export default function ProductsPage() {
                   <Badge variant="outline" className="font-mono text-xs">
                     {product.slug}
                   </Badge>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleDelete(product.id)}
-                    disabled={deletingId === product.id}
-                  >
-                    {deletingId === product.id ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-4 w-4" />
-                    )}
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <CreateTierDialog onTierCreated={() => mutate()} productId={product.id} />
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleDelete(product.id)}
+                      disabled={deletingId === product.id}
+                    >
+                      {deletingId === product.id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </div>
                 </div>
               </div>
             </CardHeader>
             <CardContent>
               <h4 className="text-sm font-medium mb-4">License Tiers</h4>
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {product.tiers?.map(tier => (
-                  <div
-                    key={tier.id}
-                    className="p-4 rounded-lg border bg-card hover:border-primary/50 transition-colors"
-                  >
-                    <div className="flex items-center justify-between mb-3">
-                      <h5 className="font-semibold">{tier.name}</h5>
-                      <div className="text-right">
-                        <span className="text-2xl font-bold">${tier.price}</span>
-                        {tier.is_subscription && (
-                          <span className="text-sm text-muted-foreground">
-                            /{tier.duration_days === 30 ? 'mo' : tier.duration_days === 365 ? 'yr' : `${tier.duration_days}d`}
-                          </span>
-                        )}
+                {product.tiers?.length ? (
+                  product.tiers.map(tier => (
+                    <div
+                      key={tier.id}
+                      className="p-4 rounded-lg border bg-card hover:border-primary/50 transition-colors"
+                    >
+                      <div className="flex items-center justify-between mb-3">
+                        <div>
+                          <h5 className="font-semibold">{tier.name}</h5>
+                          <div className="text-sm text-muted-foreground">
+                            ${tier.price}{' '}
+                            {tier.is_subscription && `/${tier.duration_days === 30 ? 'mo' : tier.duration_days === 365 ? 'yr' : `${tier.duration_days}d`}`}
+                          </div>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={async () => {
+                            if (!confirm('Delete this tier?')) return
+                            try {
+                              const response = await fetch(`/api/tiers?id=${tier.id}`, {
+                                method: 'DELETE',
+                              })
+                              if (!response.ok) throw new Error('Failed to delete tier')
+                              toast.success('Tier deleted')
+                              mutate()
+                            } catch (error) {
+                              toast.error(error instanceof Error ? error.message : 'Failed to delete tier')
+                            }
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <p className="text-sm text-muted-foreground mb-3">{tier.description}</p>
+                      <div className="space-y-2">
+                        {(tier.features as string[])?.map((feature, i) => (
+                          <div key={i} className="flex items-center gap-2 text-sm">
+                            <Check className="h-4 w-4 text-green-500" />
+                            <span>{feature}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="mt-3 pt-3 border-t flex items-center justify-between text-sm text-muted-foreground">
+                        <span>Max activations: {tier.max_activations}</span>
+                        <Badge variant={tier.is_subscription ? 'default' : 'secondary'}>
+                          {tier.is_subscription ? 'Subscription' : 'Perpetual'}
+                        </Badge>
                       </div>
                     </div>
-                    <p className="text-sm text-muted-foreground mb-3">{tier.description}</p>
-                    <div className="space-y-2">
-                      {(tier.features as string[])?.map((feature, i) => (
-                        <div key={i} className="flex items-center gap-2 text-sm">
-                          <Check className="h-4 w-4 text-green-500" />
-                          <span>{feature}</span>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="mt-3 pt-3 border-t flex items-center justify-between text-sm text-muted-foreground">
-                      <span>Max activations: {tier.max_activations}</span>
-                      <Badge variant={tier.is_subscription ? 'default' : 'secondary'}>
-                        {tier.is_subscription ? 'Subscription' : 'Perpetual'}
-                      </Badge>
-                    </div>
+                  ))
+                ) : (
+                  <div className="p-6 rounded-lg border border-dashed border-muted/50 bg-muted/10 text-center text-sm text-muted-foreground">
+                    No tiers yet. Use Add Tier to create pricing options for this product.
                   </div>
-                ))}
+                )}
               </div>
             </CardContent>
           </Card>

@@ -78,6 +78,31 @@ export default function LicensesPage() {
     }
   }
 
+  const renewLicense = async (id: string, currentDate?: string) => {
+    const suggested = currentDate ? currentDate.split('T')[0] : ''
+    const newDate = prompt('Enter new expiration date (YYYY-MM-DD):', suggested)
+    if (!newDate) return
+
+    const isoDate = new Date(newDate)
+    if (Number.isNaN(isoDate.getTime())) {
+      toast.error('Invalid date format')
+      return
+    }
+
+    try {
+      const res = await fetch(`/api/licenses/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expires_at: isoDate.toISOString() }),
+      })
+      if (!res.ok) throw new Error('Failed to renew license')
+      toast.success('License renewed successfully')
+      mutate()
+    } catch {
+      toast.error('Failed to renew license')
+    }
+  }
+
   const deleteLicense = async (id: string) => {
     if (!confirm('Are you sure you want to delete this license?')) return
     try {
@@ -241,6 +266,10 @@ export default function LicensesPage() {
                                 Reactivate
                               </DropdownMenuItem>
                             )}
+                            <DropdownMenuItem onClick={() => renewLicense(license.id, license.expires_at || undefined)}>
+                              <Key className="mr-2 h-4 w-4" />
+                              Renew expiration
+                            </DropdownMenuItem>
                             <DropdownMenuItem 
                               className="text-destructive"
                               onClick={() => deleteLicense(license.id)}

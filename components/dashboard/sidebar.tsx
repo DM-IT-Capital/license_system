@@ -22,6 +22,7 @@ const navigation = [
   { name: 'Customers', href: '/dashboard/customers', icon: Users },
   { name: 'Products', href: '/dashboard/products', icon: Package },
   { name: 'Analytics', href: '/dashboard/analytics', icon: BarChart3 },
+  { name: 'Admin Users', href: '/dashboard/users', icon: Shield },
   { name: 'Settings', href: '/dashboard/settings', icon: Settings },
 ]
 

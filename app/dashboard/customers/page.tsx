@@ -1,10 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, FormEvent } from 'react'
 import useSWR from 'swr'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Textarea } from '@/components/ui/textarea'
 import {
   Table,
   TableBody,
@@ -20,7 +23,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { CreateCustomerDialog } from '@/components/dashboard/create-customer-dialog'
-import { Plus, Search, MoreHorizontal, Eye, Mail, Trash2, Users } from 'lucide-react'
+import { Plus, Search, MoreHorizontal, Eye, Mail, Trash2, Users, Pencil, Loader2 } from 'lucide-react'
 import type { Customer } from '@/lib/types'
 import { toast } from 'sonner'
 import Link from 'next/link'
@@ -30,6 +33,17 @@ const fetcher = (url: string) => fetch(url).then(res => res.json())
 export default function CustomersPage() {
   const [search, setSearch] = useState('')
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const [editDialogOpen, setEditDialogOpen] = useState(false)
+  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+
+  // Edit form
+  const [editName, setEditName] = useState('')
+  const [editEmail, setEditEmail] = useState('')
+  const [editCompany, setEditCompany] = useState('')
+  const [editPhone, setEditPhone] = useState('')
+  const [editNotes, setEditNotes] = useState('')
+  const [savingCustomer, setSavingCustomer] = useState(false)
 
   const { data: customers, mutate } = useSWR<(Customer & { licenses: { count: number }[] })[]>('/api/customers', fetcher)
 
@@ -40,8 +54,53 @@ export default function CustomersPage() {
       customer.company?.toLowerCase().includes(search.toLowerCase())
   })
 
+  const openEditCustomer = (customer: Customer) => {
+    setEditingCustomer(customer)
+    setEditName(customer.name)
+    setEditEmail(customer.email)
+    setEditCompany(customer.company || '')
+    setEditPhone(customer.phone || '')
+    setEditNotes(customer.notes || '')
+    setEditDialogOpen(true)
+  }
+
+  const handleUpdateCustomer = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!editingCustomer) return
+
+    setSavingCustomer(true)
+    try {
+      const response = await fetch(`/api/customers/${editingCustomer.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: editName,
+          email: editEmail,
+          company: editCompany || null,
+          phone: editPhone || null,
+          notes: editNotes || null,
+        }),
+      })
+
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.error || 'Failed to update customer')
+      }
+
+      toast.success('Customer updated successfully')
+      setEditDialogOpen(false)
+      setEditingCustomer(null)
+      mutate()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to update customer')
+    } finally {
+      setSavingCustomer(false)
+    }
+  }
+
   const deleteCustomer = async (id: string) => {
     if (!confirm('Are you sure you want to delete this customer? This will also delete all their licenses.')) return
+    setDeletingId(id)
     try {
       const res = await fetch(`/api/customers/${id}`, { method: 'DELETE' })
       if (!res.ok) throw new Error('Failed to delete')
@@ -49,6 +108,8 @@ export default function CustomersPage() {
       mutate()
     } catch {
       toast.error('Failed to delete customer')
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -139,6 +200,10 @@ export default function CustomersPage() {
                                 View Details
                               </Link>
                             </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => openEditCustomer(customer)}>
+                              <Pencil className="mr-2 h-4 w-4" />
+                              Edit
+                            </DropdownMenuItem>
                             <DropdownMenuItem asChild>
                               <a href={`mailto:${customer.email}`}>
                                 <Mail className="mr-2 h-4 w-4" />
@@ -148,9 +213,10 @@ export default function CustomersPage() {
                             <DropdownMenuItem 
                               className="text-destructive"
                               onClick={() => deleteCustomer(customer.id)}
+                              disabled={deletingId === customer.id}
                             >
                               <Trash2 className="mr-2 h-4 w-4" />
-                              Delete
+                              {deletingId === customer.id ? 'Deleting...' : 'Delete'}
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -163,6 +229,83 @@ export default function CustomersPage() {
           </div>
         </CardContent>
       </Card>
+
+      <Dialog open={editDialogOpen} onOpenChange={(open) => {
+        if (!open) setEditingCustomer(null)
+        setEditDialogOpen(open)
+      }}>
+        <DialogContent className="sm:max-w-[500px]">
+          <form onSubmit={handleUpdateCustomer}>
+            <DialogHeader>
+              <DialogTitle>Edit Customer</DialogTitle>
+              <DialogDescription>Update customer details.</DialogDescription>
+            </DialogHeader>
+
+            <div className="grid gap-4 py-4">
+              <div className="grid gap-2">
+                <Label htmlFor="customer-name">Name</Label>
+                <Input
+                  id="customer-name"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="customer-email">Email</Label>
+                <Input
+                  id="customer-email"
+                  type="email"
+                  value={editEmail}
+                  onChange={(e) => setEditEmail(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="customer-company">Company</Label>
+                <Input
+                  id="customer-company"
+                  value={editCompany}
+                  onChange={(e) => setEditCompany(e.target.value)}
+                  placeholder="Optional"
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="customer-phone">Phone</Label>
+                <Input
+                  id="customer-phone"
+                  value={editPhone}
+                  onChange={(e) => setEditPhone(e.target.value)}
+                  placeholder="Optional"
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="customer-notes">Notes</Label>
+                <Textarea
+                  id="customer-notes"
+                  value={editNotes}
+                  onChange={(e) => setEditNotes(e.target.value)}
+                  placeholder="Optional"
+                  rows={3}
+                />
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setEditDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={savingCustomer}>
+                {savingCustomer ? 'Saving...' : 'Save Changes'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <CreateCustomerDialog
         open={createDialogOpen}

@@ -88,6 +88,73 @@ export async function POST(request: NextRequest) {
   }
 }
 
+export async function PATCH(request: NextRequest) {
+  try {
+    const supabase = await createServiceClient()
+    const { data: { user } } = await supabase.auth.getUser()
+
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const { searchParams } = new URL(request.url)
+    const tierId = searchParams.get('id')
+
+    if (!tierId) {
+      return NextResponse.json(
+        { error: 'Tier ID is required' },
+        { status: 400 }
+      )
+    }
+
+    const body = await request.json()
+    const {
+      name,
+      slug,
+      description,
+      price,
+      features,
+      max_activations,
+      is_subscription,
+      duration_days,
+    } = body
+
+    const updateData: Record<string, unknown> = {}
+    if (name !== undefined) updateData.name = name
+    if (slug !== undefined) updateData.slug = slug.toLowerCase()
+    if (description !== undefined) updateData.description = description
+    if (price !== undefined) updateData.price = price
+    if (features !== undefined) updateData.features = features
+    if (max_activations !== undefined) updateData.max_activations = max_activations
+    if (is_subscription !== undefined) updateData.is_subscription = Boolean(is_subscription)
+    if (duration_days !== undefined) updateData.duration_days = duration_days
+
+    if (Object.keys(updateData).length === 0) {
+      return NextResponse.json(
+        { error: 'No fields to update' },
+        { status: 400 }
+      )
+    }
+
+    const { data, error } = await supabase
+      .from('product_tiers')
+      .update(updateData)
+      .eq('id', tierId)
+      .select()
+      .single()
+
+    if (error) throw error
+
+    return NextResponse.json(data)
+  } catch (error) {
+    console.error('Error updating tier:', error)
+    return NextResponse.json(
+      { error: 'Failed to update tier' },
+      { status: 500 }
+    )
+  }
+}
+
 export async function DELETE(request: NextRequest) {
   try {
     const supabase = await createServiceClient()

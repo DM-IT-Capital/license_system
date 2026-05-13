@@ -474,3 +474,5 @@ const result = await response.json();
         </DialogContent>
       </Dialog>
     </div>
+  )
+}

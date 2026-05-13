@@ -116,17 +116,6 @@ export default function SettingsPage() {
     }
   }
 
-  const apiEndpoint = typeof window !== 'undefined' 
-    ? `${window.location.origin}/api/validate`
-    : '/api/validate'
-
-  const copyToClipboard = (text: string, id: string) => {
-    navigator.clipboard.writeText(text)
-    setCopied(id)
-    toast.success('Copied to clipboard')
-    setTimeout(() => setCopied(null), 2000)
-  }
-
   const exampleCode = `// Validate a license in your application
 const response = await fetch('${apiEndpoint}', {
   method: 'POST',

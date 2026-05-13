@@ -1,210 +1,399 @@
-import { createClient } from '@/lib/supabase/server'
 import { NextResponse, type NextRequest } from 'next/server'
+import { createServiceRoleClient } from '@/lib/supabase/service-role'
 import { parseOfflineLicensePackage, isLicenseExpired } from '@/lib/license-utils'
 
-// Public API - No auth required (your systems will call this)
-export async function POST(request: NextRequest) {
+type ValidateRequestBody = {
+  license_key?: string
+  product_slug?: string
+  machine_id?: string
+  machine_name?: string
+  offline_package?: string
+}
+
+function normalizeLicenseKey(value?: string) {
+  return String(value || '').trim().toUpperCase()
+}
+
+function normalizeSlug(value?: string) {
+  return String(value || '').trim()
+}
+
+function getClientIp(request: NextRequest) {
+  return (
+    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+    request.headers.get('x-real-ip') ||
+    null
+  )
+}
+
+async function writeValidationLog(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  payload: {
+    licenseId?: string | null
+    licenseKey?: string | null
+    productSlug?: string | null
+    machineId?: string | null
+    machineName?: string | null
+    valid: boolean
+    error?: string | null
+    requestIp?: string | null
+    userAgent?: string | null
+  },
+) {
   try {
-    const supabase = await createClient()
-    const body = await request.json()
-    const { license_key, product_slug, machine_id, machine_name, offline_package } = body
+    await supabase.from('license_validation_logs').insert({
+      license_id: payload.licenseId || null,
+      license_key: payload.licenseKey || null,
+      product_slug: payload.productSlug || null,
+      machine_id: payload.machineId || null,
+      machine_name: payload.machineName || null,
+      is_valid: payload.valid,
+      error_message: payload.error || null,
+      request_ip: payload.requestIp || null,
+      user_agent: payload.userAgent || null,
+    })
+  } catch {
+    // Do not fail license validation only because logging failed.
+  }
+}
 
-    // Get client IP
-    const ip = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown'
+async function validateOfflinePackage(
+  request: NextRequest,
+  body: ValidateRequestBody,
+) {
+  const requestIp = getClientIp(request)
+  const userAgent = request.headers.get('user-agent')
 
-    // Offline validation
-    if (offline_package) {
-      const result = parseOfflineLicensePackage(offline_package)
-      if (!result) {
-        return NextResponse.json({
+  try {
+    if (!body.offline_package) {
+      return NextResponse.json(
+        {
           valid: false,
-          error: 'Invalid offline license package'
-        })
-      }
+          error: 'Offline package is required',
+        },
+        { status: 400 },
+      )
+    }
 
-      if (!result.valid) {
-        return NextResponse.json({
+    const offlineLicense = parseOfflineLicensePackage(body.offline_package)
+
+    if (!offlineLicense) {
+      return NextResponse.json(
+        {
           valid: false,
-          error: 'License signature verification failed'
-        })
-      }
-
-      if (product_slug && result.data.productSlug !== product_slug) {
-        return NextResponse.json({
-          valid: false,
-          error: 'License is not valid for this product'
-        })
-      }
-
-      if (isLicenseExpired(result.data.expiresAt)) {
-        return NextResponse.json({
-          valid: false,
-          error: 'License has expired',
-          expired_at: result.data.expiresAt
-        })
-      }
-
-      return NextResponse.json({
-        valid: true,
-        license_key: result.data.licenseKey,
-        product: result.data.productSlug,
-        tier: result.data.tierSlug,
-        features: result.data.features,
-        expires_at: result.data.expiresAt,
-        offline: true
-      })
+          error: 'Invalid offline license package',
+        },
+        { status: 400 },
+      )
     }
 
-    // Online validation
-    if (!license_key) {
-      return NextResponse.json({
-        valid: false,
-        error: 'License key is required'
-      }, { status: 400 })
-    }
-
-    // Fetch license with product info
-    const { data: license, error: licenseError } = await supabase
-      .from('licenses')
-      .select(`
-        *,
-        product:products(*),
-        tier:product_tiers(*)
-      `)
-      .eq('license_key', license_key.toUpperCase())
-      .single()
-
-    // Log the validation attempt
-    const logValidation = async (result: string, errorMessage?: string) => {
-      await supabase.from('license_validation_logs').insert({
-        license_id: license?.id || null,
-        license_key: license_key.toUpperCase(),
-        product_slug: product_slug || null,
-        machine_id: machine_id || null,
-        ip_address: ip,
-        validation_result: result,
-        error_message: errorMessage || null
-      })
-    }
-
-    if (licenseError || !license) {
-      await logValidation('not_found', 'License not found')
-      return NextResponse.json({
-        valid: false,
-        error: 'License not found'
-      })
-    }
-
-    // Check product match
-    if (product_slug && license.product.slug !== product_slug) {
-      await logValidation('invalid', 'Product mismatch')
-      return NextResponse.json({
-        valid: false,
-        error: 'License is not valid for this product'
-      })
-    }
-
-    // Check status
-    if (license.status === 'revoked') {
-      await logValidation('invalid', 'License revoked')
-      return NextResponse.json({
-        valid: false,
-        error: 'License has been revoked'
-      })
-    }
-
-    if (license.status === 'suspended') {
-      await logValidation('suspended', 'License suspended')
-      return NextResponse.json({
-        valid: false,
-        error: 'License is suspended'
-      })
-    }
-
-    // Check expiration
-    if (isLicenseExpired(license.expires_at)) {
-      await logValidation('expired', 'License expired')
-      // Update status to expired if not already
-      if (license.status !== 'expired') {
-        await supabase
-          .from('licenses')
-          .update({ status: 'expired' })
-          .eq('id', license.id)
-      }
+    if (isLicenseExpired(offlineLicense.expires_at)) {
       return NextResponse.json({
         valid: false,
         error: 'License has expired',
-        expired_at: license.expires_at
+        expired_at: offlineLicense.expires_at,
       })
     }
 
-    // Handle machine activation
-    if (machine_id) {
-      // Check if this machine is already activated
+    return NextResponse.json({
+      valid: true,
+      offline: true,
+      license_key: offlineLicense.license_key,
+      product_slug: offlineLicense.product_slug,
+      product_name: offlineLicense.product_name,
+      tier: offlineLicense.tier,
+      tier_name: offlineLicense.tier_name,
+      features: offlineLicense.features || [],
+      expires_at: offlineLicense.expires_at,
+      max_activations: offlineLicense.max_activations,
+      current_activations: offlineLicense.current_activations,
+      request_ip: requestIp,
+      user_agent: userAgent,
+    })
+  } catch (error: any) {
+    return NextResponse.json(
+      {
+        valid: false,
+        error: error?.message || 'Failed to validate offline license',
+      },
+      { status: 400 },
+    )
+  }
+}
+
+export async function POST(request: NextRequest) {
+  const supabase = createServiceRoleClient()
+
+  const requestIp = getClientIp(request)
+  const userAgent = request.headers.get('user-agent')
+
+  try {
+    const body = (await request.json()) as ValidateRequestBody
+
+    if (body.offline_package) {
+      return validateOfflinePackage(request, body)
+    }
+
+    const licenseKey = normalizeLicenseKey(body.license_key)
+    const productSlug = normalizeSlug(body.product_slug)
+    const machineId = String(body.machine_id || '').trim() || null
+    const machineName = String(body.machine_name || '').trim() || null
+
+    if (!licenseKey) {
+      return NextResponse.json(
+        {
+          valid: false,
+          error: 'license_key is required',
+        },
+        { status: 400 },
+      )
+    }
+
+    if (!productSlug) {
+      return NextResponse.json(
+        {
+          valid: false,
+          error: 'product_slug is required',
+        },
+        { status: 400 },
+      )
+    }
+
+    const { data: license, error: licenseError } = await supabase
+      .from('licenses')
+      .select(
+        `
+          id,
+          license_key,
+          status,
+          expires_at,
+          max_activations,
+          current_activations,
+          customer_id,
+          product_id,
+          tier_id,
+          customers (
+            id,
+            name,
+            email
+          ),
+          products (
+            id,
+            name,
+            slug
+          ),
+          product_tiers (
+            id,
+            name,
+            slug,
+            features,
+            max_activations
+          )
+        `,
+      )
+      .eq('license_key', licenseKey)
+      .single()
+
+    if (licenseError || !license) {
+      await writeValidationLog(supabase, {
+        licenseKey,
+        productSlug,
+        machineId,
+        machineName,
+        valid: false,
+        error: 'License not found',
+        requestIp,
+        userAgent,
+      })
+
+      return NextResponse.json({
+        valid: false,
+        error: 'License not found',
+      })
+    }
+
+    const product = Array.isArray(license.products)
+      ? license.products[0]
+      : license.products
+
+    const tier = Array.isArray(license.product_tiers)
+      ? license.product_tiers[0]
+      : license.product_tiers
+
+    const customer = Array.isArray(license.customers)
+      ? license.customers[0]
+      : license.customers
+
+    if (!product || product.slug !== productSlug) {
+      await writeValidationLog(supabase, {
+        licenseId: license.id,
+        licenseKey,
+        productSlug,
+        machineId,
+        machineName,
+        valid: false,
+        error: 'License does not belong to this product',
+        requestIp,
+        userAgent,
+      })
+
+      return NextResponse.json({
+        valid: false,
+        error: 'License does not belong to this product',
+      })
+    }
+
+    if (license.status !== 'active') {
+      await writeValidationLog(supabase, {
+        licenseId: license.id,
+        licenseKey,
+        productSlug,
+        machineId,
+        machineName,
+        valid: false,
+        error: `License is ${license.status}`,
+        requestIp,
+        userAgent,
+      })
+
+      return NextResponse.json({
+        valid: false,
+        error: `License is ${license.status}`,
+      })
+    }
+
+    if (license.expires_at && new Date(license.expires_at).getTime() < Date.now()) {
+      await supabase
+        .from('licenses')
+        .update({
+          status: 'expired',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', license.id)
+
+      await writeValidationLog(supabase, {
+        licenseId: license.id,
+        licenseKey,
+        productSlug,
+        machineId,
+        machineName,
+        valid: false,
+        error: 'License has expired',
+        requestIp,
+        userAgent,
+      })
+
+      return NextResponse.json({
+        valid: false,
+        error: 'License has expired',
+        expired_at: license.expires_at,
+      })
+    }
+
+    const maxActivations =
+      Number(license.max_activations || tier?.max_activations || 1) || 1
+
+    let currentActivations = Number(license.current_activations || 0) || 0
+
+    if (machineId) {
       const { data: existingActivation } = await supabase
         .from('license_activations')
-        .select()
+        .select('id, machine_id')
         .eq('license_id', license.id)
-        .eq('machine_id', machine_id)
-        .single()
+        .eq('machine_id', machineId)
+        .maybeSingle()
 
-      if (existingActivation) {
-        // Update last seen
-        await supabase
-          .from('license_activations')
-          .update({ last_seen_at: new Date().toISOString(), ip_address: ip })
-          .eq('id', existingActivation.id)
-      } else {
-        // Check max activations
-        if (license.current_activations >= license.max_activations) {
-          await logValidation('max_activations', 'Maximum activations reached')
+      if (!existingActivation) {
+        if (currentActivations >= maxActivations) {
+          await writeValidationLog(supabase, {
+            licenseId: license.id,
+            licenseKey,
+            productSlug,
+            machineId,
+            machineName,
+            valid: false,
+            error: 'Maximum activations reached',
+            requestIp,
+            userAgent,
+          })
+
           return NextResponse.json({
             valid: false,
-            error: 'Maximum number of activations reached',
-            max_activations: license.max_activations,
-            current_activations: license.current_activations
+            error: 'Maximum activations reached',
+            max_activations: maxActivations,
+            current_activations: currentActivations,
           })
         }
 
-        // Add new activation
-        await supabase.from('license_activations').insert({
-          license_id: license.id,
-          machine_id,
-          machine_name: machine_name || null,
-          ip_address: ip
-        })
+        const { error: activationError } = await supabase
+          .from('license_activations')
+          .insert({
+            license_id: license.id,
+            machine_id: machineId,
+            machine_name: machineName,
+            activated_at: new Date().toISOString(),
+            last_seen_at: new Date().toISOString(),
+            request_ip: requestIp,
+            user_agent: userAgent,
+          })
 
-        // Update activation count
+        if (!activationError) {
+          currentActivations += 1
+
+          await supabase
+            .from('licenses')
+            .update({
+              current_activations: currentActivations,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', license.id)
+        }
+      } else {
         await supabase
-          .from('licenses')
-          .update({ current_activations: license.current_activations + 1 })
-          .eq('id', license.id)
+          .from('license_activations')
+          .update({
+            machine_name: machineName,
+            last_seen_at: new Date().toISOString(),
+            request_ip: requestIp,
+            user_agent: userAgent,
+          })
+          .eq('id', existingActivation.id)
       }
     }
 
-    await logValidation('valid')
+    await writeValidationLog(supabase, {
+      licenseId: license.id,
+      licenseKey,
+      productSlug,
+      machineId,
+      machineName,
+      valid: true,
+      error: null,
+      requestIp,
+      userAgent,
+    })
 
     return NextResponse.json({
       valid: true,
       license_key: license.license_key,
-      product: license.product.slug,
-      product_name: license.product.name,
-      tier: license.tier.slug,
-      tier_name: license.tier.name,
-      features: license.tier.features,
+      product_slug: product.slug,
+      product_name: product.name,
+      customer_name: customer?.name || null,
+      customer_email: customer?.email || null,
+      tier: tier?.slug || null,
+      tier_name: tier?.name || null,
+      features: tier?.features || [],
       expires_at: license.expires_at,
-      max_activations: license.max_activations,
-      current_activations: license.current_activations + (machine_id && !license.current_activations ? 1 : 0),
-      customer: {
-        name: license.customer?.name,
-        email: license.customer?.email
-      }
+      max_activations: maxActivations,
+      current_activations: currentActivations,
     })
-  } catch (error) {
-    console.error('Error validating license:', error)
+  } catch (error: any) {
     return NextResponse.json(
-      { valid: false, error: 'Validation failed' },
-      { status: 500 }
+      {
+        valid: false,
+        error: error?.message || 'Failed to validate license',
+      },
+      { status: 500 },
     )
   }
 }
